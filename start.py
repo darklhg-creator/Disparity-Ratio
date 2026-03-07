@@ -1,4 +1,3 @@
-import FinanceDataReader as fdr
 import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -7,7 +6,8 @@ import time
 # ==========================================
 # 0. 사용자 설정
 # ==========================================
-IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
+API_KEY = "62e0d95b35661ef8e1f9a665ef46cc7cd64a3ace4d179612dda40c847f6bdb7e"
 
 KST_TIMEZONE = timezone(timedelta(hours=9))
 CURRENT_KST = datetime.now(KST_TIMEZONE)
@@ -19,30 +19,82 @@ TARGET_DATE = CURRENT_KST.strftime("%Y-%m-%d")
 def send_discord_message(content):
     try:
         data = {'content': content}
-        requests.post(IGYEOK_WEBHOOK_URL, json=data)
+        requests.post(DISCORD_WEBHOOK_URL, json=data)
     except Exception as e:
         print(f"디스코드 전송 실패: {e}")
 
 # ==========================================
-# 2. 종목 리스트 가져오기 (fdr 사용)
+# 2. 공공데이터포털 API로 주식 시세 가져오기
+# ==========================================
+def get_stock_price(code):
+    url = "https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo"
+    params = {
+        "serviceKey": API_KEY,
+        "numOfRows": "30",
+        "pageNo": "1",
+        "resultType": "json",
+        "likeSrtnCd": code
+    }
+    try:
+        res = requests.get(url, params=params, timeout=10)
+        data = res.json()
+        items = data['response']['body']['items']['item']
+        if isinstance(items, dict):
+            items = [items]
+        df = pd.DataFrame(items)
+        df['clpr'] = pd.to_numeric(df['clpr'].str.replace(',', ''), errors='coerce')
+        df = df.sort_values('basDt')
+        return df
+    except:
+        return None
+
+# ==========================================
+# 3. 종목 리스트 가져오기
 # ==========================================
 def get_stock_list():
-    print("📡 KOSPI 종목 리스트 불러오는 중...")
-    df_kospi = fdr.StockListing('KOSPI')
-    print("📡 KOSDAQ 종목 리스트 불러오는 중...")
-    df_kosdaq = fdr.StockListing('KOSDAQ')
+    print("📡 종목 리스트 불러오는 중...")
+    url = "https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo"
+    
+    rows = []
+    for market in ["KOSPI", "KOSDAQ"]:
+        page = 1
+        while True:
+            params = {
+                "serviceKey": API_KEY,
+                "numOfRows": "100",
+                "pageNo": str(page),
+                "resultType": "json",
+                "mrktCls": market
+            }
+            try:
+                res = requests.get(url, params=params, timeout=10)
+                data = res.json()
+                items = data['response']['body']['items']['item']
+                if isinstance(items, dict):
+                    items = [items]
+                
+                for item in items:
+                    rows.append({
+                        'Code': item.get('srtnCd', ''),
+                        'Name': item.get('itmsNm', ''),
+                        'Market': market
+                    })
+                
+                total = int(data['response']['body']['totalCount'])
+                if page * 100 >= min(total, 500 if market == "KOSPI" else 1000):
+                    break
+                page += 1
+                time.sleep(0.2)
+            except Exception as e:
+                print(f"종목 리스트 오류: {e}")
+                break
 
-    df_kospi = df_kospi.head(500)
-    df_kosdaq = df_kosdaq.head(1000)
-
-    df_kospi['Market'] = 'KOSPI'
-    df_kosdaq['Market'] = 'KOSDAQ'
-
-    df_total = pd.concat([df_kospi, df_kosdaq], ignore_index=True)
-    return df_total
+    df = pd.DataFrame(rows).drop_duplicates(subset=['Code'])
+    print(f"✅ 총 {len(df)}개 종목 로드 완료")
+    return df
 
 # ==========================================
-# 3. 메인 로직
+# 4. 메인 로직
 # ==========================================
 def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
@@ -54,30 +106,21 @@ def main():
         if df_final_list.empty:
             raise Exception("종목 리스트가 비어있습니다.")
 
-        # 컬럼명 통일 (fdr은 버전마다 컬럼명이 다를 수 있음)
-        if 'Symbol' in df_final_list.columns:
-            df_final_list = df_final_list.rename(columns={'Symbol': 'Code'})
-        if 'Name' not in df_final_list.columns and 'ISU_ABBRV' in df_final_list.columns:
-            df_final_list = df_final_list.rename(columns={'ISU_ABBRV': 'Name'})
-
         all_analyzed = []
         total_len = len(df_final_list)
         print(f"📡 총 {total_len}개 종목 분석 시작...")
 
         for idx, row in df_final_list.iterrows():
-            code = row.get('Code') or row.get('Symbol', '')
-            name = row.get('Name', code)
-
-            if not code:
-                continue
+            code = row['Code']
+            name = row['Name']
 
             try:
-                df = fdr.DataReader(code).tail(30)
-                if len(df) < 20:
+                df = get_stock_price(code)
+                if df is None or len(df) < 20:
                     continue
 
-                current_price = df['Close'].iloc[-1]
-                ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
+                current_price = df['clpr'].iloc[-1]
+                ma20 = df['clpr'].rolling(window=20).mean().iloc[-1]
 
                 if pd.isna(ma20) or ma20 == 0:
                     continue
@@ -88,8 +131,7 @@ def main():
             except:
                 continue
 
-            if idx % 50 == 0:
-                time.sleep(0.5)
+            time.sleep(0.1)
 
         # 계단식 필터링
         results = [r for r in all_analyzed if r['disparity'] <= 90.0]
