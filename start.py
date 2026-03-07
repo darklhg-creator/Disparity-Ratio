@@ -25,10 +25,27 @@ def send_discord_message(content):
         print(f"디스코드 전송 실패: {e}")
 
 # ==========================================
-# 2. pykrx로 종목 리스트 가져오기
+# 2. 가장 최근 거래일 찾기
+# ==========================================
+def get_latest_trading_date():
+    """가장 최근 거래일 반환 (주말/공휴일이면 이전 거래일로)"""
+    date = CURRENT_KST
+    for _ in range(10):
+        weekday = date.weekday()
+        if weekday < 5:  # 월~금
+            date_str = date.strftime("%Y%m%d")
+            tickers = stock.get_market_ticker_list(date_str, market="KOSPI")
+            if tickers:  # 데이터가 있으면 해당 날짜 반환
+                return date_str
+        date = date - timedelta(days=1)
+    raise Exception("최근 거래일을 찾을 수 없습니다.")
+
+# ==========================================
+# 3. pykrx로 종목 리스트 가져오기
 # ==========================================
 def get_stock_list():
-    date_str = TARGET_DATE.replace("-", "")
+    date_str = get_latest_trading_date()
+    print(f"📅 기준 거래일: {date_str}")
 
     kospi_tickers = stock.get_market_ticker_list(date_str, market="KOSPI")
     kosdaq_tickers = stock.get_market_ticker_list(date_str, market="KOSDAQ")
@@ -44,7 +61,7 @@ def get_stock_list():
     return pd.DataFrame(rows)
 
 # ==========================================
-# 3. 메인 로직
+# 4. 메인 로직
 # ==========================================
 def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
@@ -55,7 +72,7 @@ def main():
         df_final_list = get_stock_list()
 
         if df_final_list.empty:
-            raise Exception("종목 리스트가 비어있습니다. 휴장일일 수 있습니다.")
+            raise Exception("종목 리스트가 비어있습니다.")
 
         all_analyzed = []
         total_len = len(df_final_list)
