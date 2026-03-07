@@ -1,7 +1,6 @@
 import FinanceDataReader as fdr
 import requests
 import pandas as pd
-from pykrx import stock
 from datetime import datetime, timedelta, timezone
 import time
 
@@ -25,67 +24,52 @@ def send_discord_message(content):
         print(f"디스코드 전송 실패: {e}")
 
 # ==========================================
-# 2. 가장 최근 거래일 찾기
-# ==========================================
-def get_latest_trading_date():
-    date = CURRENT_KST
-    # 오늘이 주말이거나 장 마감 전(15:30 이전)이면 어제부터 탐색
-    if date.weekday() >= 5 or date.hour < 15 or (date.hour == 15 and date.minute < 30):
-        date = date - timedelta(days=1)
-
-    for _ in range(30):
-        date_str = date.strftime("%Y%m%d")
-        try:
-            tickers = stock.get_market_ticker_list(date_str, market="KOSPI")
-            if tickers and len(tickers) > 0:
-                print(f"📅 기준 거래일: {date_str}")
-                return date_str
-        except:
-            pass
-        date = date - timedelta(days=1)
-
-    raise Exception("최근 거래일을 찾을 수 없습니다.")
-
-# ==========================================
-# 3. pykrx로 종목 리스트 가져오기
+# 2. 종목 리스트 가져오기 (fdr 사용)
 # ==========================================
 def get_stock_list():
-    date_str = get_latest_trading_date()
+    print("📡 KOSPI 종목 리스트 불러오는 중...")
+    df_kospi = fdr.StockListing('KOSPI')
+    print("📡 KOSDAQ 종목 리스트 불러오는 중...")
+    df_kosdaq = fdr.StockListing('KOSDAQ')
 
-    kospi_tickers = stock.get_market_ticker_list(date_str, market="KOSPI")
-    kosdaq_tickers = stock.get_market_ticker_list(date_str, market="KOSDAQ")
+    df_kospi = df_kospi.head(500)
+    df_kosdaq = df_kosdaq.head(1000)
 
-    rows = []
-    for ticker in kospi_tickers[:500]:
-        name = stock.get_market_ticker_name(ticker)
-        rows.append({'Code': ticker, 'Name': name, 'Market': 'KOSPI'})
-    for ticker in kosdaq_tickers[:1000]:
-        name = stock.get_market_ticker_name(ticker)
-        rows.append({'Code': ticker, 'Name': name, 'Market': 'KOSDAQ'})
+    df_kospi['Market'] = 'KOSPI'
+    df_kosdaq['Market'] = 'KOSDAQ'
 
-    return pd.DataFrame(rows)
+    df_total = pd.concat([df_kospi, df_kosdaq], ignore_index=True)
+    return df_total
 
 # ==========================================
-# 4. 메인 로직
+# 3. 메인 로직
 # ==========================================
 def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
     print("✅ 분석을 시작합니다...")
 
     try:
-        print("📡 종목 리스트 불러오는 중...")
         df_final_list = get_stock_list()
 
         if df_final_list.empty:
             raise Exception("종목 리스트가 비어있습니다.")
+
+        # 컬럼명 통일 (fdr은 버전마다 컬럼명이 다를 수 있음)
+        if 'Symbol' in df_final_list.columns:
+            df_final_list = df_final_list.rename(columns={'Symbol': 'Code'})
+        if 'Name' not in df_final_list.columns and 'ISU_ABBRV' in df_final_list.columns:
+            df_final_list = df_final_list.rename(columns={'ISU_ABBRV': 'Name'})
 
         all_analyzed = []
         total_len = len(df_final_list)
         print(f"📡 총 {total_len}개 종목 분석 시작...")
 
         for idx, row in df_final_list.iterrows():
-            code = row['Code']
-            name = row['Name']
+            code = row.get('Code') or row.get('Symbol', '')
+            name = row.get('Name', code)
+
+            if not code:
+                continue
 
             try:
                 df = fdr.DataReader(code).tail(30)
