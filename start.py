@@ -130,11 +130,11 @@ def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
 
     # 휴장일 체크
-    #if is_holiday():
-    #    msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
-    #    print(msg)
-    #    send_discord_message(msg)
-    #    return
+    if is_holiday():
+        msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
+        print(msg)
+        send_discord_message(msg)
+        return
 
     print("✅ 분석을 시작합니다...")
 
@@ -145,9 +145,11 @@ def main():
         print(f"✅ 거래일 확인: {trading_dates[0]} ~ {trading_dates[-1]}")
 
         # 날짜별로 전체 종목 데이터 수집
+        # 역순으로 수집해서 가장 최근 거래일 EPS를 먼저 저장
         print("📡 날짜별 전체 종목 시세 수집 중... (20번 호출)")
         date_data = {}
-        for i, date_str in enumerate(trading_dates):
+
+        for i, date_str in enumerate(reversed(trading_dates)):
             print(f"  {i+1}/20 날짜 {date_str} 수집 중...")
             items = get_all_stocks_by_date(date_str)
             for item in items:
@@ -155,6 +157,7 @@ def main():
                 market = item.get('mrktCtg', '')
                 if market not in ['KOSPI', 'KOSDAQ']:
                     continue
+
                 if code not in date_data:
                     date_data[code] = {
                         'name': item.get('itmsNm', ''),
@@ -162,19 +165,22 @@ def main():
                         'prices': [],
                         'eps': None
                     }
+
                 try:
                     price = float(str(item.get('clpr', '0')).replace(',', ''))
-                    date_data[code]['prices'].append(price)
+                    date_data[code]['prices'].insert(0, price)  # 역순이므로 앞에 삽입
                 except:
                     pass
 
-                # EPS는 가장 최근 날짜 데이터에서 저장
+                # EPS는 가장 최근 거래일에서만 저장 (0이 아닌 값으로)
                 if date_data[code]['eps'] is None:
                     try:
                         eps_str = str(item.get('eps', '0') or '0').replace(',', '').strip()
-                        date_data[code]['eps'] = float(eps_str)
+                        eps_val = float(eps_str)
+                        if eps_val != 0:
+                            date_data[code]['eps'] = eps_val
                     except:
-                        date_data[code]['eps'] = None
+                        pass
 
             time.sleep(0.3)
 
@@ -197,7 +203,7 @@ def main():
 
             # EPS로 흑자/적자 판단
             eps = info.get('eps')
-            if eps is None:
+            if eps is None or eps == 0:
                 profit_label = ''
             elif eps > 0:
                 profit_label = '[흑자]'
