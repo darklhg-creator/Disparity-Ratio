@@ -28,16 +28,22 @@ def send_discord_message(content):
 # 2. 가장 최근 거래일 찾기
 # ==========================================
 def get_latest_trading_date():
-    """가장 최근 거래일 반환 (주말/공휴일이면 이전 거래일로)"""
     date = CURRENT_KST
-    for _ in range(10):
-        weekday = date.weekday()
-        if weekday < 5:  # 월~금
-            date_str = date.strftime("%Y%m%d")
-            tickers = stock.get_market_ticker_list(date_str, market="KOSPI")
-            if tickers:  # 데이터가 있으면 해당 날짜 반환
-                return date_str
+    # 오늘이 주말이거나 장 마감 전(15:30 이전)이면 어제부터 탐색
+    if date.weekday() >= 5 or date.hour < 15 or (date.hour == 15 and date.minute < 30):
         date = date - timedelta(days=1)
+
+    for _ in range(30):
+        date_str = date.strftime("%Y%m%d")
+        try:
+            tickers = stock.get_market_ticker_list(date_str, market="KOSPI")
+            if tickers and len(tickers) > 0:
+                print(f"📅 기준 거래일: {date_str}")
+                return date_str
+        except:
+            pass
+        date = date - timedelta(days=1)
+
     raise Exception("최근 거래일을 찾을 수 없습니다.")
 
 # ==========================================
@@ -45,7 +51,6 @@ def get_latest_trading_date():
 # ==========================================
 def get_stock_list():
     date_str = get_latest_trading_date()
-    print(f"📅 기준 거래일: {date_str}")
 
     kospi_tickers = stock.get_market_ticker_list(date_str, market="KOSPI")
     kosdaq_tickers = stock.get_market_ticker_list(date_str, market="KOSDAQ")
