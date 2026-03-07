@@ -51,61 +51,97 @@ def is_holiday():
     return False
 
 # ==========================================
-# 3. DART에서 영업이익 데이터 가져오기
+# 3. DART 종목코드 → 고유번호 매핑 가져오기
 # ==========================================
-def get_profit_status():
-    """DART API로 영업이익 흑자/적자 종목 코드 딕셔너리 반환"""
-    print("📊 DART 재무데이터 수집 중...")
-    profit_dict = {}
+def get_corp_code_map():
+    """DART에서 전체 기업 고유번호 목록 가져오기 (stock_code → corp_code 매핑)"""
+    print("📊 DART 기업코드 목록 수신 중...")
+    import zipfile
+    import io
 
-    # 최근 연도 결산 기준
-    current_year = CURRENT_KST.year
-    target_year = str(current_year - 1)  # 작년 결산 기준
-
-    url = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json"
-    params = {
-        "crtfc_key": DART_API_KEY,
-        "bsns_year": target_year,
-        "reprt_code": "11011",  # 사업보고서
-        "fs_div": "CFS"  # 연결재무제표
-    }
+    url = "https://opendart.fss.or.kr/api/corpCode.xml"
+    params = {"crtfc_key": DART_API_KEY}
 
     try:
         res = requests.get(url, params=params, timeout=30)
-        data = res.json()
+        zf = zipfile.ZipFile(io.BytesIO(res.content))
+        xml_data = zf.read("CORPCODE.xml").decode("utf-8")
 
-        if data.get('status') != '000':
-            print(f"DART API 오류: {data.get('message')}")
-            # 연결재무제표 없으면 별도재무제표로 시도
-            params['fs_div'] = 'OFS'
-            res = requests.get(url, params=params, timeout=30)
-            data = res.json()
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml_data)
 
-        items = data.get('list', [])
-        print(f"✅ DART 데이터 {len(items)}건 수신")
+        corp_map = {}
+        for item in root.findall('list'):
+            stock_code = item.findtext('stock_code', '').strip()
+            corp_code = item.findtext('corp_code', '').strip()
+            if stock_code:
+                corp_map[stock_code] = corp_code
 
-        for item in items:
-            stock_code = item.get('stock_code', '').strip()
-            account_nm = item.get('account_nm', '')
-            thstrm_amount = item.get('thstrm_amount', '0') or '0'
-
-            if '영업이익' in account_nm and stock_code:
-                try:
-                    amount = int(thstrm_amount.replace(',', '').replace('-', '0') if thstrm_amount == '-' else thstrm_amount.replace(',', ''))
-                    original = item.get('thstrm_amount', '0') or '0'
-                    is_profit = not original.strip().startswith('-') and amount > 0
-                    profit_dict[stock_code] = '흑자' if is_profit else '적자'
-                except:
-                    profit_dict[stock_code] = '확인불가'
+        print(f"✅ 기업코드 {len(corp_map)}개 로드 완료")
+        return corp_map
 
     except Exception as e:
-        print(f"DART 수집 오류: {e}")
+        print(f"기업코드 수신 오류: {e}")
+        return {}
 
-    print(f"✅ 영업이익 데이터 {len(profit_dict)}개 종목 완료")
+# ==========================================
+# 4. DART에서 영업이익 데이터 가져오기
+# ==========================================
+def get_profit_status(corp_map, stock_codes):
+    """주어진 종목코드 리스트의 영업이익 흑자/적자 반환"""
+    print("📊 DART 영업이익 데이터 수집 중...")
+    profit_dict = {}
+
+    target_year = str(CURRENT_KST.year - 1)
+    url = "https://opendart.fss.or.kr/api/fnlttSinglAcnt.json"
+
+    for i, stock_code in enumerate(stock_codes):
+        corp_code = corp_map.get(stock_code)
+        if not corp_code:
+            profit_dict[stock_code] = '확인불가'
+            continue
+
+        params = {
+            "crtfc_key": DART_API_KEY,
+            "corp_code": corp_code,
+            "bsns_year": target_year,
+            "reprt_code": "11011",  # 사업보고서
+            "fs_div": "CFS"  # 연결재무제표
+        }
+
+        try:
+            res = requests.get(url, params=params, timeout=10)
+            data = res.json()
+
+            if data.get('status') != '000':
+                # 연결재무제표 없으면 별도재무제표로 시도
+                params['fs_div'] = 'OFS'
+                res = requests.get(url, params=params, timeout=10)
+                data = res.json()
+
+            items = data.get('list', [])
+            for item in items:
+                if '영업이익' in item.get('account_nm', ''):
+                    amount_str = item.get('thstrm_amount', '0') or '0'
+                    amount_str = amount_str.replace(',', '').strip()
+                    is_profit = not amount_str.startswith('-') and amount_str not in ['0', '']
+                    profit_dict[stock_code] = '흑자' if is_profit else '적자'
+                    break
+            else:
+                profit_dict[stock_code] = '확인불가'
+
+        except:
+            profit_dict[stock_code] = '확인불가'
+
+        if i % 50 == 0:
+            print(f"  영업이익 조회 중... {i}/{len(stock_codes)}")
+        time.sleep(0.1)
+
+    print(f"✅ 영업이익 데이터 {len(profit_dict)}개 완료")
     return profit_dict
 
 # ==========================================
-# 4. 날짜별 전체 종목 시세 한번에 가져오기
+# 5. 날짜별 전체 종목 시세 한번에 가져오기
 # ==========================================
 def get_all_stocks_by_date(date_str):
     url = "https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo"
@@ -144,7 +180,7 @@ def get_all_stocks_by_date(date_str):
     return all_items
 
 # ==========================================
-# 5. 최근 20 거래일 날짜 리스트 구하기
+# 6. 최근 20 거래일 날짜 리스트 구하기
 # ==========================================
 def get_recent_trading_dates(n=20):
     dates = []
@@ -179,23 +215,23 @@ def get_recent_trading_dates(n=20):
     return sorted(dates)
 
 # ==========================================
-# 6. 메인 로직
+# 7. 메인 로직
 # ==========================================
 def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
 
     # 휴장일 체크
-    #if is_holiday():
-    #    msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
-    #    print(msg)
-    #    send_discord_message(msg)
-    #    return
+    # if is_holiday():
+    #     msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
+    #     print(msg)
+    #     send_discord_message(msg)
+    #     return
 
     print("✅ 분석을 시작합니다...")
 
     try:
-        # DART 재무데이터 먼저 수집
-        profit_dict = get_profit_status()
+        # DART 기업코드 매핑 먼저 수집
+        corp_map = get_corp_code_map()
 
         # 최근 20 거래일 날짜 가져오기
         print("📅 최근 20 거래일 날짜 조회 중...")
@@ -242,17 +278,11 @@ def main():
                 continue
 
             disparity = round((current_price / ma20) * 100, 1)
-
-            # 종목코드 앞 0 제거해서 DART 코드와 매칭
-            dart_code = code.lstrip('0') if code else code
-            profit_status = profit_dict.get(code) or profit_dict.get(dart_code, '확인불가')
-
             all_analyzed.append({
                 'name': info['name'],
                 'code': code,
                 'market': info['market'],
-                'disparity': disparity,
-                'profit': profit_status
+                'disparity': disparity
             })
 
         # KOSPI 500, KOSDAQ 1000으로 제한
@@ -260,7 +290,7 @@ def main():
         kosdaq = [r for r in all_analyzed if r['market'] == 'KOSDAQ'][:1000]
         all_analyzed = kospi + kosdaq
 
-        # 계단식 필터링
+        # 이격도 필터링
         results = [r for r in all_analyzed if r['disparity'] <= 90.0]
         filter_level = "이격도 90% 이하 (초과대낙폭)"
 
@@ -269,13 +299,20 @@ def main():
             results = [r for r in all_analyzed if r['disparity'] <= 95.0]
             filter_level = "이격도 95% 이하 (일반낙폭)"
 
+        # 이격도 필터링된 종목만 DART 조회
+        result_codes = [r['code'] for r in results]
+        profit_dict = get_profit_status(corp_map, result_codes)
+
         if results:
             results = sorted(results, key=lambda x: x['disparity'])
 
             report = f"### 📊 종목 분석 결과 ({filter_level})\n"
             for r in results[:40]:
-                profit_label = f"[{r['profit']}]" if r['profit'] != '확인불가' else ''
-                report += f"· **{r['name']}({r['code']})**: {r['disparity']}% {profit_label}\n"
+                profit_label = profit_dict.get(r['code'], '확인불가')
+                if profit_label != '확인불가':
+                    report += f"· **{r['name']}({r['code']})**: {r['disparity']}% [{profit_label}]\n"
+                else:
+                    report += f"· **{r['name']}({r['code']})**: {r['disparity']}%\n"
 
             report += "\n" + "="*30 + "\n"
             report += "📝 **[Check List]**\n"
