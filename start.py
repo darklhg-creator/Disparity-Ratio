@@ -1,4 +1,4 @@
-pythonimport FinanceDataReader as fdr
+import FinanceDataReader as fdr
 import requests
 import pandas as pd
 from pykrx import stock
@@ -8,7 +8,7 @@ import time
 # ==========================================
 # 0. 사용자 설정
 # ==========================================
-IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/..."
+IGYEOK_WEBHOOK_URL = "https://discord.com/api/webhooks/1461902939139604684/ZdCdITanTb3sotd8LlCYlJzSYkVLduAsjC6CD2h26X56wXoQRw7NY72kTNzxTI6UE4Pi"
 
 KST_TIMEZONE = timezone(timedelta(hours=9))
 CURRENT_KST = datetime.now(KST_TIMEZONE)
@@ -48,7 +48,7 @@ def get_stock_list():
 # 3. 메인 로직
 # ==========================================
 def main():
-
+    print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)"
 
         all_analyzed = []
         total_len = len(df_final_list)
