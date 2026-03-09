@@ -122,7 +122,7 @@ def get_index_disparity():
     print("📈 코스피/코스닥 지수 이격도 계산 중...")
     result = {}
 
-    for code, name in [("KS11", "KOSPI"), ("KQ11", "KOSDAQ")]:
+    for code, name in [("^KS11", "KOSPI"), ("^KQ11", "KOSDAQ")]:
         try:
             start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")
             df = fdr.DataReader(code, start_date)
@@ -140,7 +140,7 @@ def get_index_disparity():
             result[name] = None
 
     return result
-
+    
 def get_index_comment(name, disparity):
     if disparity is None:
         return f"· {name}: 데이터 없음"
