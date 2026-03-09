@@ -1,16 +1,12 @@
 import requests
+from bs4 import BeautifulSoup
 
-KRX_API_KEY = "5AB85D9D43EA4FAA9BC1907303BAFDC2C0377C5B"
-
-# 고객예탁금 테스트
-url = "http://data-dbg.krx.co.kr/svc/apis/sto/stk_bydd_trd"
-params = {
-    "basDd": "20260306"
-}
 headers = {
-    "AUTH_KEY": KRX_API_KEY
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
 }
 
-res = requests.get(url, params=params, headers=headers, timeout=10)
+# KOFIA 고객예탁금/신용잔고
+url = "https://www.kofia.or.kr/brd/m_215/view.do"
+res = requests.get(url, headers=headers, timeout=10)
 print("상태코드:", res.status_code)
-print("응답:", res.text[:500])
+print("응답:", res.text[:300])
