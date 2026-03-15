@@ -22,6 +22,9 @@ TARGET_DATE = CURRENT_KST.strftime("%Y-%m-%d")
 start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")
 BSNS_YEAR = str(CURRENT_KST.year - 1)
 
+# 부채비율 필터 제외 업종코드 (앞자리 기준)
+DEBT_EXEMPT_CODES = ('6', '35', '49', '51', '41')
+
 # ==========================================
 # 1. 공통 함수
 # ==========================================
@@ -195,9 +198,23 @@ def get_corp_code_map():
     return stock_to_corp
 
 # ==========================================
-# 6. 당기순이익 + 부채비율 조회
+# 6. 당기순이익 + 부채비율 조회 (업종별 부채비율 예외처리)
 # ==========================================
 def get_dart_info(corp_code):
+    # 업종코드 먼저 조회
+    induty_code = None
+    try:
+        res = requests.get("https://opendart.fss.or.kr/api/company.json", params={
+            "crtfc_key": DART_API_KEY,
+            "corp_code": corp_code
+        }, timeout=10)
+        induty_code = res.json().get('induty_code', '') or ''
+    except:
+        pass
+
+    # 부채비율 필터 제외 여부
+    debt_exempt = any(induty_code.startswith(c) for c in DEBT_EXEMPT_CODES)
+
     url = "https://opendart.fss.or.kr/api/fnlttSinglAcnt.json"
     for reprt_code in ["11011", "11014"]:
         params = {
@@ -232,8 +249,9 @@ def get_dart_info(corp_code):
                 if sj == 'BS' and account == '부채총계':
                     total_liabilities = amount
 
+            # 부채비율 (예외 업종은 계산 안 함)
             debt_ratio = None
-            if total_assets and total_liabilities:
+            if not debt_exempt and total_assets and total_liabilities:
                 equity = total_assets - total_liabilities
                 if equity > 0:
                     debt_ratio = round((total_liabilities / equity) * 100, 1)
@@ -280,7 +298,6 @@ def get_market_capital_info():
         prev_credit = int(credit_data[1]['crdTrFingWhl']) if len(credit_data) > 1 else None
 
         credit_ratio = round((today_credit / today_deposit) * 100, 2)
-
         credit_change = None
         if prev_credit and prev_credit > 0:
             credit_change = round((today_credit - prev_credit) / prev_credit * 100, 2)
@@ -404,11 +421,11 @@ def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
     print(f"📅 DART 조회 기준연도: {BSNS_YEAR}")
 
-    #if is_holiday():
-    #    msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
-    #    print(msg)
-    #    send_discord_message(msg)
-    #    return
+   # if is_holiday():
+   #     msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
+   #     print(msg)
+   #     send_discord_message(msg)
+   #     return
 
     print("✅ 분석을 시작합니다...")
 
