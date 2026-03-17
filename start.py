@@ -387,10 +387,14 @@ def fetch_disparity(row):
 def get_index_disparity():
     print("📈 코스피/코스닥 지수 이격도 계산 중...")
     result = {}
-    idx_start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")  # 직접 계산
+    idx_start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")
     for code, name in [("^KS11", "KOSPI"), ("^KQ11", "KOSDAQ")]:
         try:
             df = fdr.DataReader(code, idx_start_date)
+            # NaN 제거
+            df = df.dropna(subset=['Close'])
+            # 중복 날짜 제거 (마지막 값 유지)
+            df = df[~df.index.duplicated(keep='last')]
             if len(df) < 20:
                 result[name] = None
                 continue
