@@ -387,9 +387,10 @@ def fetch_disparity(row):
 def get_index_disparity():
     print("📈 코스피/코스닥 지수 이격도 계산 중...")
     result = {}
+    idx_start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")  # 직접 계산
     for code, name in [("^KS11", "KOSPI"), ("^KQ11", "KOSDAQ")]:
         try:
-            df = fdr.DataReader(code, start_date)
+            df = fdr.DataReader(code, idx_start_date)
             if len(df) < 20:
                 result[name] = None
                 continue
@@ -421,11 +422,11 @@ def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
     print(f"📅 DART 조회 기준연도: {BSNS_YEAR}")
 
-   # if is_holiday():
-   #     msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
-   #     print(msg)
-   #     send_discord_message(msg)
-   #     return
+    if is_holiday():
+        msg = f"⏹️ [{TARGET_DATE}] 오늘은 휴장일입니다."
+        print(msg)
+        send_discord_message(msg)
+        return
 
     print("✅ 분석을 시작합니다...")
 
@@ -518,7 +519,7 @@ def main():
 
             report += "\n" + "="*30 + "\n"
             report += "📝 **[Check List]**\n"
-            report += "1. 영업이익 적자기업 제외하고 테마별로 표로 분류\n"
+            report += "1. 최근 일주일간수급이 몰리는 테마순위로 표분류하고 \n"
             report += "2. 최근 일주일간 뉴스 및 날짜 확인\n"
             report += "3. 이격도 하락 원인 분석\n"
             report += "4. 펀더멘탈 거버넌스 벨류에이션 및 최근 일주일간 호재와 강세섹터 종합 판단 후 최종 종목 선정\n"
