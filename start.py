@@ -530,7 +530,7 @@ def main():
             for r in profit_results[:50]:
                 oi = r.get('operating_income')
                 oi_str = f"{oi/1e8:.0f}억" if oi else "데이터없음"
-                report += f"· **{r['name']}({r['code']})**: 이격도 {r['disparity']}% / 영업이익 {oi_str}\n"
+                report += f"· **{r['name']}({r['code']})**: 이격도 {r['disparity']}% \n"
 
             report += "\n" + "="*30 + "\n"
             report += "📝 **[Check List]**\n"
