@@ -29,9 +29,13 @@ DEBT_EXEMPT_CODES = ('6', '35', '49', '51', '41')
 # 1. 공통 함수
 # ==========================================
 def send_discord_message(content):
+    """디스코드 메시지 전송 (응답코드 출력)"""
     try:
         data = {'content': content}
-        requests.post(DISCORD_WEBHOOK_URL, json=data)
+        response = requests.post(DISCORD_WEBHOOK_URL, json=data)
+        print(f"디스코드 전송: 상태코드 {response.status_code} / {len(content)}자")
+        if response.status_code not in (200, 204):
+            print(f"  ⚠️ 응답 내용: {response.text}")
     except Exception as e:
         print(f"디스코드 전송 실패: {e}")
 
@@ -472,7 +476,7 @@ def main():
         print(f"📊 DART 당기순이익/부채비율/영업이익 조회 중... ({len(results)}개 종목)")
         profit_results = []
         excluded_profit = 0
-        excluded_operating = 0  # ✅ 영업이익 적자 제외 카운터
+        excluded_operating = 0
         excluded_debt = 0
         excluded_nodata = 0
 
@@ -491,7 +495,7 @@ def main():
             elif net_income <= 0:
                 excluded_profit += 1
                 print(f"  ❌ 순손실 제외: {r['name']}({r['code']})")
-            elif operating_income is not None and operating_income <= 0:  # ✅ 영업이익 적자 필터
+            elif operating_income is not None and operating_income <= 0:
                 excluded_operating += 1
                 print(f"  ❌ 영업손실 제외: {r['name']}({r['code']}) {operating_income/1e8:.0f}억")
             elif debt_ratio and debt_ratio > 200:
@@ -503,12 +507,12 @@ def main():
 
             time.sleep(0.2)
 
-        # 영업이익 높은순 정렬 (None은 맨 뒤로)
+        # 영업이익 높은순 정렬 후 상위 50개만
         profit_results = sorted(
             profit_results,
             key=lambda x: x.get('operating_income') or 0,
             reverse=True
-        )
+        )[:50]
 
         print(f"✅ 순손실 제외: {excluded_profit}개, 영업손실 제외: {excluded_operating}개, 부채비율 제외: {excluded_debt}개, 데이터없음 제외: {excluded_nodata}개, 최종: {len(profit_results)}개")
 
@@ -516,30 +520,38 @@ def main():
         index_disparity = get_index_disparity()
 
         if profit_results:
-            report = "📈 **[시장 이격도]**\n"
-            report += get_index_comment("KOSPI", index_disparity.get('KOSPI')) + "\n"
-            report += get_index_comment("KOSDAQ", index_disparity.get('KOSDAQ')) + "\n"
+            # ==========================================
+            # 📨 메시지 1: 시장 이격도 + 자금현황
+            # ==========================================
+            msg1  = f"📈 **[{TARGET_DATE} 시장 이격도]**\n"
+            msg1 += get_index_comment("KOSPI",  index_disparity.get('KOSPI'))  + "\n"
+            msg1 += get_index_comment("KOSDAQ", index_disparity.get('KOSDAQ')) + "\n"
+            msg1 += "\n" + "="*30 + "\n"
+            msg1 += "💰 **[시장 자금 현황]**\n"
+            msg1 += get_capital_comment(capital_info)
 
-            report += "\n" + "="*30 + "\n"
-            report += "💰 **[시장 자금 현황]**\n"
-            report += get_capital_comment(capital_info)
+            send_discord_message(msg1)
+            time.sleep(1)  # 메시지 사이 간격
 
-            report += "\n" + "="*30 + "\n"
-            report += f"### 📊 종목 분석 결과 ({filter_level} / 당기순이익+영업이익 흑자 / 부채비율200%이하 / 영업이익 높은순 / {BSNS_YEAR}년 기준)\n"
-            for r in profit_results[:50]:
+            # ==========================================
+            # 📨 메시지 2: 종목 분석 결과 + 체크리스트
+            # ==========================================
+            msg2  = f"📊 **[종목 분석 결과]** ({filter_level} / {BSNS_YEAR}년 기준 / 영업이익 높은순 상위 {len(profit_results)}개)\n"
+            msg2 += "="*30 + "\n"
+            for r in profit_results:
                 oi = r.get('operating_income')
                 oi_str = f"{oi/1e8:.0f}억" if oi else "데이터없음"
-                report += f"· **{r['name']}({r['code']})**: 이격도 {r['disparity']}% / 영업이익 {oi_str}\n"
+                msg2 += f"· **{r['name']}({r['code']})**: 이격도 {r['disparity']}% / 영업이익 {oi_str}\n"
+            msg2 += "\n" + "="*30 + "\n"
+            msg2 += "📝 **[Check List]**\n"
+            msg2 += "1. 최근 일주일간 수급이 몰리는 테마순위로 표분류\n"
+            msg2 += "2. 최근 일주일간 뉴스검색해서 주도테마 선정\n"
+            msg2 += "3. 주도테마 고려해서 최대실적이 예상되거나 영업이익 전망이 좋은 기업순으로 추천\n"
+            msg2 += "4. 추천한 종목들 이격도 하락 원인 분석해서 추천한게 맞는지 검증\n"
 
-            report += "\n" + "="*30 + "\n"
-            report += "📝 **[Check List]**\n"
-            report += "1. 최근 일주일간수급이 몰리는 테마순위로 표분류하고 \n"
-            report += "2. 최근 일주일간 뉴스검색해서 주도테마 선정\n"
-            report += "3. 주도테마 고려해서 최대실적이 예상되거나 영업이익 전망이 좋은 기업순으로 추천\n"
-            report += "4. 추천한 종목들 이격도 하락 원인 분석해서 추천한게 맞는지 검증\n"
+            send_discord_message(msg2)
+            print(f"✅ 메시지 2개 전송 완료. (종목 {len(profit_results)}개)")
 
-            send_discord_message(report)
-            print(f"✅ {len(profit_results)}개 추출 및 전송 완료.")
         else:
             send_discord_message("🔍 조건에 맞는 종목이 없습니다.")
 
