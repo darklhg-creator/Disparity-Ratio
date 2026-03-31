@@ -20,16 +20,14 @@ KST_TIMEZONE = timezone(timedelta(hours=9))
 CURRENT_KST = datetime.now(KST_TIMEZONE)
 TARGET_DATE = CURRENT_KST.strftime("%Y-%m-%d")
 start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")
-BSNS_YEAR = str(CURRENT_KST.year - 2)  # 2026 → 2024 확정 연간 데이터
+BSNS_YEAR = str(CURRENT_KST.year - 2)
 
-# 부채비율 필터 제외 업종코드 (앞자리 기준)
 DEBT_EXEMPT_CODES = ('6', '35', '49', '51', '41')
 
 # ==========================================
-# 1. 공통 함수
+# 1. 디스코드 전송
 # ==========================================
 def send_discord_message(content):
-    """디스코드 메시지 전송 (응답코드 출력)"""
     try:
         data = {'content': content}
         response = requests.post(DISCORD_WEBHOOK_URL, json=data)
@@ -40,15 +38,13 @@ def send_discord_message(content):
         print(f"디스코드 전송 실패: {e}")
 
 # ==========================================
-# 2. 휴장일 체크 (주말만)
+# 2. 휴장일 체크
 # ==========================================
 def is_holiday():
-    if CURRENT_KST.weekday() >= 5:
-        return True
-    return False
+    return CURRENT_KST.weekday() >= 5
 
 # ==========================================
-# 3. 종목 리스트 가져오기
+# 3. 종목 리스트
 # ==========================================
 def get_stock_list():
     print("📡 종목 리스트 불러오는 중...")
@@ -59,18 +55,10 @@ def get_stock_list():
     recent_date = None
     for _ in range(10):
         date_str = date.strftime("%Y%m%d")
-        params = {
-            "serviceKey": API_KEY,
-            "numOfRows": "1",
-            "pageNo": "1",
-            "resultType": "json",
-            "basDt": date_str
-        }
+        params = {"serviceKey": API_KEY, "numOfRows": "1", "pageNo": "1", "resultType": "json", "basDt": date_str}
         try:
             res = requests.get(url, params=params, timeout=10)
-            data = res.json()
-            total = int(data['response']['body']['totalCount'])
-            if total > 0:
+            if int(res.json()['response']['body']['totalCount']) > 0:
                 recent_date = date_str
                 break
         except:
@@ -80,7 +68,6 @@ def get_stock_list():
 
     if not recent_date:
         raise Exception("최근 거래일을 찾을 수 없습니다.")
-
     print(f"📅 기준 거래일: {recent_date}")
 
     for market in ["KOSPI", "KOSDAQ"]:
@@ -88,28 +75,17 @@ def get_stock_list():
         page = 1
         market_rows = []
         while len(market_rows) < max_stocks:
-            params = {
-                "serviceKey": API_KEY,
-                "numOfRows": "2000",
-                "pageNo": str(page),
-                "resultType": "json",
-                "basDt": recent_date,
-                "mrktCls": market
-            }
+            params = {"serviceKey": API_KEY, "numOfRows": "2000", "pageNo": str(page),
+                      "resultType": "json", "basDt": recent_date, "mrktCls": market}
             try:
                 res = requests.get(url, params=params, timeout=15)
-                data = res.json()
-                body = data['response']['body']
+                body = res.json()['response']['body']
                 total = int(body['totalCount'])
                 items = body['items']['item']
                 if isinstance(items, dict):
                     items = [items]
                 for item in items:
-                    market_rows.append({
-                        'Code': item.get('srtnCd', ''),
-                        'Name': item.get('itmsNm', ''),
-                        'Market': market
-                    })
+                    market_rows.append({'Code': item.get('srtnCd', ''), 'Name': item.get('itmsNm', ''), 'Market': market})
                 if page * 2000 >= total:
                     break
                 page += 1
@@ -129,18 +105,14 @@ def get_stock_list():
 def get_krx_filter():
     print("📡 KRX 관리종목/거래정지 조회 중...")
     exclude_codes = set()
-
     date = CURRENT_KST
     recent_date = None
     for _ in range(10):
         date_str = date.strftime("%Y%m%d")
-        url = "https://data-dbg.krx.co.kr/svc/apis/sto/ksq_bydd_trd"
-        headers = {"AUTH_KEY": KRX_API_KEY}
-        params = {"basDd": date_str}
         try:
-            res = requests.get(url, params=params, headers=headers, timeout=10)
-            data = res.json()
-            if data.get('OutBlock_1'):
+            res = requests.get("https://data-dbg.krx.co.kr/svc/apis/sto/ksq_bydd_trd",
+                               params={"basDd": date_str}, headers={"AUTH_KEY": KRX_API_KEY}, timeout=10)
+            if res.json().get('OutBlock_1'):
                 recent_date = date_str
                 break
         except:
@@ -151,27 +123,18 @@ def get_krx_filter():
     if not recent_date:
         print("⚠️ KRX 데이터 조회 실패, 필터 건너뜀")
         return exclude_codes
-
     print(f"📅 KRX 기준일: {recent_date}")
 
-    for api, market in [
-        ("sto/stk_bydd_trd", "KOSPI"),
-        ("sto/ksq_bydd_trd", "KOSDAQ")
-    ]:
-        url = f"https://data-dbg.krx.co.kr/svc/apis/{api}"
-        headers = {"AUTH_KEY": KRX_API_KEY}
-        params = {"basDd": recent_date}
+    for api, market in [("sto/stk_bydd_trd", "KOSPI"), ("sto/ksq_bydd_trd", "KOSDAQ")]:
         try:
-            res = requests.get(url, params=params, headers=headers, timeout=10)
-            data = res.json()
-            for item in data.get('OutBlock_1', []):
+            res = requests.get(f"https://data-dbg.krx.co.kr/svc/apis/{api}",
+                               params={"basDd": recent_date}, headers={"AUTH_KEY": KRX_API_KEY}, timeout=10)
+            for item in res.json().get('OutBlock_1', []):
                 code = item.get('ISU_CD', '')
-                sect = item.get('SECT_TP_NM', '').strip()
-                volume = item.get('ACC_TRDVOL', '0')
-                if '관리' in sect:
+                if '관리' in item.get('SECT_TP_NM', '').strip():
                     exclude_codes.add(code)
                 try:
-                    if int(volume) == 0:
+                    if int(item.get('ACC_TRDVOL', '0')) == 0:
                         exclude_codes.add(code)
                 except:
                     pass
@@ -186,12 +149,10 @@ def get_krx_filter():
 # ==========================================
 def get_corp_code_map():
     print("📡 DART 기업코드 매핑 중...")
-    url = "https://opendart.fss.or.kr/api/corpCode.xml"
-    params = {"crtfc_key": DART_API_KEY}
-    res = requests.get(url, params=params, timeout=30)
+    res = requests.get("https://opendart.fss.or.kr/api/corpCode.xml",
+                       params={"crtfc_key": DART_API_KEY}, timeout=30)
     z = zipfile.ZipFile(io.BytesIO(res.content))
-    xml_data = z.read('CORPCODE.xml')
-    root = ET.fromstring(xml_data)
+    root = ET.fromstring(z.read('CORPCODE.xml'))
     stock_to_corp = {}
     for item in root.findall('list'):
         stock_code = item.findtext('stock_code', '').strip()
@@ -202,49 +163,37 @@ def get_corp_code_map():
     return stock_to_corp
 
 # ==========================================
-# 6. 당기순이익 + 부채비율 + 영업이익 조회
+# 6. DART 재무정보 조회
 # ==========================================
 def get_dart_info(corp_code):
-    induty_code = None
+    induty_code = ''
     try:
-        res = requests.get("https://opendart.fss.or.kr/api/company.json", params={
-            "crtfc_key": DART_API_KEY,
-            "corp_code": corp_code
-        }, timeout=10)
+        res = requests.get("https://opendart.fss.or.kr/api/company.json",
+                           params={"crtfc_key": DART_API_KEY, "corp_code": corp_code}, timeout=10)
         induty_code = res.json().get('induty_code', '') or ''
     except:
         pass
 
     debt_exempt = any(induty_code.startswith(c) for c in DEBT_EXEMPT_CODES)
 
-    url = "https://opendart.fss.or.kr/api/fnlttSinglAcnt.json"
     for reprt_code in ["11011", "11014"]:
-        params = {
-            "crtfc_key": DART_API_KEY,
-            "corp_code": corp_code,
-            "bsns_year": BSNS_YEAR,
-            "reprt_code": reprt_code
-        }
         try:
-            res = requests.get(url, params=params, timeout=10)
+            res = requests.get("https://opendart.fss.or.kr/api/fnlttSinglAcnt.json", params={
+                "crtfc_key": DART_API_KEY, "corp_code": corp_code,
+                "bsns_year": BSNS_YEAR, "reprt_code": reprt_code
+            }, timeout=10)
             data = res.json()
             if data.get('status') != '000':
                 continue
 
-            net_income = None
-            total_assets = None
-            total_liabilities = None
-            operating_income = None
-
+            net_income = total_assets = total_liabilities = operating_income = None
             for item in data['list']:
                 sj = item.get('sj_div', '')
                 account = item.get('account_nm', '')
-                amount_str = item.get('thstrm_amount', '0').replace(',', '').replace(' ', '')
                 try:
-                    amount = int(amount_str) if amount_str else None
+                    amount = int(item.get('thstrm_amount', '0').replace(',', '').replace(' ', ''))
                 except:
                     amount = None
-
                 if sj == 'IS' and account == '당기순이익(손실)':
                     net_income = amount
                 if sj == 'IS' and '영업이익' in account:
@@ -261,60 +210,37 @@ def get_dart_info(corp_code):
                     debt_ratio = round((total_liabilities / equity) * 100, 1)
 
             return net_income, debt_ratio, operating_income
-
         except:
             continue
 
     return None, None, None
 
 # ==========================================
-# 7. 고객예탁금 + 신용잔고 조회
+# 7. 고객예탁금 + 신용잔고
 # ==========================================
 def get_market_capital_info():
     print("💰 고객예탁금/신용잔고 조회 중...")
     base = "https://apis.data.go.kr/1160100/service/GetKofiaStatisticsInfoService"
-
     try:
-        res = requests.get(base + "/getSecuritiesMarketTotalCapitalInfo", params={
-            "serviceKey": API_KEY,
-            "numOfRows": "2",
-            "pageNo": "1",
-            "resultType": "json"
-        }, timeout=10)
-        deposit_data = res.json()['response']['body']['items']['item']
-        if isinstance(deposit_data, dict):
-            deposit_data = [deposit_data]
-        deposit_data = sorted(deposit_data, key=lambda x: x['basDt'], reverse=True)
+        res = requests.get(base + "/getSecuritiesMarketTotalCapitalInfo",
+                           params={"serviceKey": API_KEY, "numOfRows": "2", "pageNo": "1", "resultType": "json"}, timeout=10)
+        deposit_raw = res.json()['response']['body']['items']['item']
+        deposit_data = sorted(deposit_raw if isinstance(deposit_raw, list) else [deposit_raw],
+                              key=lambda x: x['basDt'], reverse=True)
 
-        res = requests.get(base + "/getGrantingOfCreditBalanceInfo", params={
-            "serviceKey": API_KEY,
-            "numOfRows": "2",
-            "pageNo": "1",
-            "resultType": "json"
-        }, timeout=10)
-        credit_data = res.json()['response']['body']['items']['item']
-        if isinstance(credit_data, dict):
-            credit_data = [credit_data]
-        credit_data = sorted(credit_data, key=lambda x: x['basDt'], reverse=True)
+        res = requests.get(base + "/getGrantingOfCreditBalanceInfo",
+                           params={"serviceKey": API_KEY, "numOfRows": "2", "pageNo": "1", "resultType": "json"}, timeout=10)
+        credit_raw = res.json()['response']['body']['items']['item']
+        credit_data = sorted(credit_raw if isinstance(credit_raw, list) else [credit_raw],
+                             key=lambda x: x['basDt'], reverse=True)
 
         today_deposit = int(deposit_data[0]['invrDpsgAmt'])
         today_credit = int(credit_data[0]['crdTrFingWhl'])
         prev_credit = int(credit_data[1]['crdTrFingWhl']) if len(credit_data) > 1 else None
-
         credit_ratio = round((today_credit / today_deposit) * 100, 2)
-        credit_change = None
-        if prev_credit and prev_credit > 0:
-            credit_change = round((today_credit - prev_credit) / prev_credit * 100, 2)
-
+        credit_change = round((today_credit - prev_credit) / prev_credit * 100, 2) if prev_credit else None
         print(f"✅ 고객예탁금: {today_deposit/1e12:.1f}조, 신용잔고: {today_credit/1e12:.1f}조, 비율: {credit_ratio}%")
-
-        return {
-            'deposit': today_deposit,
-            'credit': today_credit,
-            'credit_ratio': credit_ratio,
-            'credit_change': credit_change
-        }
-
+        return {'deposit': today_deposit, 'credit': today_credit, 'credit_ratio': credit_ratio, 'credit_change': credit_change}
     except Exception as e:
         print(f"고객예탁금/신용잔고 조회 오류: {e}")
         return None
@@ -322,66 +248,38 @@ def get_market_capital_info():
 def get_capital_comment(info):
     if info is None:
         return "· 고객예탁금/신용잔고: 데이터 없음\n"
-
-    deposit_str = f"{info['deposit']/1e12:.1f}조"
-    credit_str = f"{info['credit']/1e12:.1f}조"
     ratio = info['credit_ratio']
     change = info['credit_change']
-
-    if ratio <= 20:
-        ratio_comment = f"{ratio}% ✅ 안전 (레버리지 낮음)"
-    elif ratio <= 25:
-        ratio_comment = f"{ratio}% 📊 보통"
-    elif ratio <= 30:
-        ratio_comment = f"{ratio}% ⚠️ 주의 (레버리지 과다)"
-    else:
-        ratio_comment = f"{ratio}% 🚨 위험 (폭락장 전조 가능성)"
-
-    if change is None:
-        change_comment = "전일대비: 데이터 없음"
-    elif change <= -4:
-        change_comment = f"전일대비: {change}% 🚨 급감 (반대매매 위험)"
-    elif change <= -2:
-        change_comment = f"전일대비: {change}% ⚠️ 주의"
-    elif change >= 2:
-        change_comment = f"전일대비: {change}% ⚠️ 레버리지 증가"
-    else:
-        change_comment = f"전일대비: {change}% 📊 보통"
-
-    result = f"· 고객예탁금: {deposit_str} / 신용잔고: {credit_str}\n"
-    result += f"· 신용잔고/예탁금 비율: {ratio_comment}\n"
-    result += f"· 신용잔고 {change_comment}\n"
-    return result
+    ratio_comment = (f"{ratio}% ✅ 안전 (레버리지 낮음)" if ratio <= 20 else
+                     f"{ratio}% 📊 보통" if ratio <= 25 else
+                     f"{ratio}% ⚠️ 주의 (레버리지 과다)" if ratio <= 30 else
+                     f"{ratio}% 🚨 위험 (폭락장 전조 가능성)")
+    change_comment = ("전일대비: 데이터 없음" if change is None else
+                      f"전일대비: {change}% 🚨 급감 (반대매매 위험)" if change <= -4 else
+                      f"전일대비: {change}% ⚠️ 주의" if change <= -2 else
+                      f"전일대비: {change}% ⚠️ 레버리지 증가" if change >= 2 else
+                      f"전일대비: {change}% 📊 보통")
+    return (f"· 고객예탁금: {info['deposit']/1e12:.1f}조 / 신용잔고: {info['credit']/1e12:.1f}조\n"
+            f"· 신용잔고/예탁금 비율: {ratio_comment}\n"
+            f"· 신용잔고 {change_comment}\n")
 
 # ==========================================
 # 8. 이격도 계산 (멀티스레딩용)
 # ==========================================
 def fetch_disparity(row):
-    code = row['Code']
-    name = row['Name']
-    market = row['Market']
+    code, name, market = row['Code'], row['Name'], row['Market']
     try:
         df = fdr.DataReader(code, start_date)
         if len(df) < 20:
             return None
-
-        avg_volume = sum(df['Volume'].tolist()[-20:]) / 20
-        if avg_volume < 100000:
+        if sum(df['Volume'].tolist()[-20:]) / 20 < 100000:
             return None
-
         closes = df['Close'].tolist()
-        current_price = closes[-1]
         ma20 = sum(closes[-20:]) / 20
         if ma20 == 0:
             return None
-
-        disparity = round((current_price / ma20) * 100, 2)
-        return {
-            'name': name,
-            'code': code,
-            'market': market,
-            'disparity': disparity
-        }
+        disparity = round((closes[-1] / ma20) * 100, 2)
+        return {'name': name, 'code': code, 'market': market, 'disparity': disparity}
     except:
         return None
 
@@ -391,19 +289,16 @@ def fetch_disparity(row):
 def get_index_disparity():
     print("📈 코스피/코스닥 지수 이격도 계산 중...")
     result = {}
-    idx_start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")
+    idx_start = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")
     for code, name in [("^KS11", "KOSPI"), ("^KQ11", "KOSDAQ")]:
         try:
-            df = fdr.DataReader(code, idx_start_date)
-            df = df.dropna(subset=['Close'])
+            df = fdr.DataReader(code, idx_start).dropna(subset=['Close'])
             df = df[~df.index.duplicated(keep='last')]
             if len(df) < 20:
                 result[name] = None
                 continue
             closes = df['Close'].tolist()
-            current = closes[-1]
-            ma20 = sum(closes[-20:]) / 20
-            disparity = round((current / ma20) * 100, 2)
+            disparity = round((closes[-1] / (sum(closes[-20:]) / 20)) * 100, 2)
             result[name] = disparity
             print(f"✅ {name} 이격도: {disparity}%")
         except Exception as e:
@@ -466,19 +361,16 @@ def main():
         print(f"✅ {len(all_analyzed)}개 종목 분석 완료")
 
         results = [r for r in all_analyzed if r['disparity'] <= 90.0]
-        filter_level = "이격도 90% 이하 (초과대낙폭)"
+        filter_level = "이격도 90% 이하"
 
         if not results:
             print("💡 90% 이하가 없어 95%로 범위를 넓힙니다.")
             results = [r for r in all_analyzed if r['disparity'] <= 95.0]
-            filter_level = "이격도 95% 이하 (일반낙폭)"
+            filter_level = "이격도 95% 이하"
 
-        print(f"📊 DART 당기순이익/부채비율/영업이익 조회 중... ({len(results)}개 종목)")
+        print(f"📊 DART 재무정보 조회 중... ({len(results)}개 종목)")
         profit_results = []
-        excluded_profit = 0
-        excluded_operating = 0
-        excluded_debt = 0
-        excluded_nodata = 0
+        excluded_profit = excluded_operating = excluded_debt = excluded_nodata = 0
 
         for r in results:
             corp_code = corp_map.get(r['code'])
@@ -504,54 +396,44 @@ def main():
             else:
                 r['operating_income'] = operating_income
                 profit_results.append(r)
-
             time.sleep(0.2)
 
-        # 영업이익 높은순 정렬 후 상위 50개만
-        profit_results = sorted(
-            profit_results,
-            key=lambda x: x.get('operating_income') or 0,
-            reverse=True
-        )[:50]
+        # 영업이익 높은순 정렬, 상위 50개
+        profit_results = sorted(profit_results, key=lambda x: x.get('operating_income') or 0, reverse=True)[:50]
 
-        print(f"✅ 순손실 제외: {excluded_profit}개, 영업손실 제외: {excluded_operating}개, 부채비율 제외: {excluded_debt}개, 데이터없음 제외: {excluded_nodata}개, 최종: {len(profit_results)}개")
+        print(f"✅ 순손실 제외: {excluded_profit}개, 영업손실 제외: {excluded_operating}개, "
+              f"부채비율 제외: {excluded_debt}개, 데이터없음 제외: {excluded_nodata}개, 최종: {len(profit_results)}개")
 
         capital_info = get_market_capital_info()
         index_disparity = get_index_disparity()
 
         if profit_results:
-            # ==========================================
             # 📨 메시지 1: 시장 이격도 + 자금현황
-            # ==========================================
             msg1  = f"📈 **[{TARGET_DATE} 시장 이격도]**\n"
             msg1 += get_index_comment("KOSPI",  index_disparity.get('KOSPI'))  + "\n"
             msg1 += get_index_comment("KOSDAQ", index_disparity.get('KOSDAQ')) + "\n"
             msg1 += "\n" + "="*30 + "\n"
             msg1 += "💰 **[시장 자금 현황]**\n"
             msg1 += get_capital_comment(capital_info)
-
             send_discord_message(msg1)
-            time.sleep(1)  # 메시지 사이 간격
+            time.sleep(1)
 
-            # ==========================================
             # 📨 메시지 2: 종목 분석 결과 + 체크리스트
-            # ==========================================
             msg2  = f"📊 **[종목 분석 결과]** ({filter_level} / {BSNS_YEAR}년 기준 / 영업이익 높은순 상위 {len(profit_results)}개)\n"
             msg2 += "="*30 + "\n"
             for r in profit_results:
                 oi = r.get('operating_income')
-                oi_str = f"{oi/1e8:.0f}억" if oi else "데이터없음"
-                msg2 += f"· **{r['name']}({r['code']})**: 이격도 {r['disparity']}% / 영업이익 {oi_str}\n"
+                oi_str = f"{oi/1e8:.0f}억" if oi else "-"
+                msg2 += f"· {r['name']} : {r['disparity']}% / {oi_str}\n"
             msg2 += "\n" + "="*30 + "\n"
             msg2 += "📝 **[Check List]**\n"
             msg2 += "1. 최근 일주일간 수급이 몰리는 테마순위로 표분류\n"
             msg2 += "2. 최근 일주일간 뉴스검색해서 주도테마 선정\n"
             msg2 += "3. 주도테마 고려해서 최대실적이 예상되거나 영업이익 전망이 좋은 기업순으로 추천\n"
             msg2 += "4. 추천한 종목들 이격도 하락 원인 분석해서 추천한게 맞는지 검증\n"
-
             send_discord_message(msg2)
-            print(f"✅ 메시지 2개 전송 완료. (종목 {len(profit_results)}개)")
 
+            print(f"✅ 메시지 2개 전송 완료. (종목 {len(profit_results)}개)")
         else:
             send_discord_message("🔍 조건에 맞는 종목이 없습니다.")
 
