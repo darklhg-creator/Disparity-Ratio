@@ -71,7 +71,7 @@ def get_stock_list():
     print(f"📅 기준 거래일: {recent_date}")
 
     for market in ["KOSPI", "KOSDAQ"]:
-        max_stocks = 500 if market == "KOSPI" else 1000
+        max_stocks = 1000 if market == "KOSPI" else 1000
         page = 1
         market_rows = []
         while len(market_rows) < max_stocks:
