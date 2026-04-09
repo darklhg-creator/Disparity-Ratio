@@ -22,8 +22,6 @@ TARGET_DATE = CURRENT_KST.strftime("%Y-%m-%d")
 start_date = (CURRENT_KST - timedelta(days=60)).strftime("%Y-%m-%d")
 BSNS_YEAR = str(CURRENT_KST.year - 2)
 
-DEBT_EXEMPT_CODES = ('6', '35', '49', '51', '41')
-
 # ==========================================
 # 1. 디스코드 전송
 # ==========================================
@@ -163,7 +161,7 @@ def get_corp_code_map():
     return stock_to_corp
 
 # ==========================================
-# 6. DART 재무정보 조회 (순이익만 체크)
+# 6. DART 영업이익 조회
 # ==========================================
 def get_dart_info(corp_code):
     for reprt_code in ["11011", "11014"]:
@@ -176,7 +174,7 @@ def get_dart_info(corp_code):
             if data.get('status') != '000':
                 continue
 
-            net_income = operating_income = None
+            operating_income = None
             for item in data['list']:
                 sj = item.get('sj_div', '')
                 account = item.get('account_nm', '')
@@ -184,16 +182,14 @@ def get_dart_info(corp_code):
                     amount = int(item.get('thstrm_amount', '0').replace(',', '').replace(' ', ''))
                 except:
                     amount = None
-                if sj == 'IS' and account == '당기순이익(손실)':
-                    net_income = amount
                 if sj == 'IS' and '영업이익' in account:
                     operating_income = amount
 
-            return net_income, operating_income
+            return operating_income
         except:
             continue
 
-    return None, None
+    return None
 
 # ==========================================
 # 7. 고객예탁금 + 신용잔고
@@ -349,8 +345,8 @@ def main():
             filter_level = "이격도 95% 이하"
 
         print(f"📊 DART 재무정보 조회 중... ({len(results)}개 종목)")
-        profit_results = []
-        excluded_profit = excluded_nodata = 0
+        final_results = []
+        excluded_nodata = 0
 
         for r in results:
             corp_code = corp_map.get(r['code'])
@@ -359,28 +355,25 @@ def main():
                 print(f"  ⚠️ 데이터없음 제외: {r['name']}({r['code']})")
                 continue
 
-            net_income, operating_income = get_dart_info(corp_code)
+            operating_income = get_dart_info(corp_code)
 
-            if net_income is None:
+            if operating_income is None:
                 excluded_nodata += 1
                 print(f"  ⚠️ 데이터없음 제외: {r['name']}({r['code']})")
-            elif net_income <= 0:
-                excluded_profit += 1
-                print(f"  ❌ 순손실 제외: {r['name']}({r['code']})")
             else:
                 r['operating_income'] = operating_income
-                profit_results.append(r)
+                final_results.append(r)
             time.sleep(0.2)
 
         # 영업이익 높은순 정렬, 상위 50개
-        profit_results = sorted(profit_results, key=lambda x: x.get('operating_income') or 0, reverse=True)[:50]
+        final_results = sorted(final_results, key=lambda x: x.get('operating_income') or 0, reverse=True)[:50]
 
-        print(f"✅ 순손실 제외: {excluded_profit}개, 데이터없음 제외: {excluded_nodata}개, 최종: {len(profit_results)}개")
+        print(f"✅ 데이터없음 제외: {excluded_nodata}개, 최종: {len(final_results)}개")
 
         capital_info = get_market_capital_info()
         index_disparity = get_index_disparity()
 
-        if profit_results:
+        if final_results:
             # 📨 메시지 1: 시장 이격도 + 자금현황
             msg1  = f"📈 **[{TARGET_DATE} 시장 이격도]**\n"
             msg1 += get_index_comment("KOSPI",  index_disparity.get('KOSPI'))  + "\n"
@@ -392,11 +385,11 @@ def main():
             time.sleep(1)
 
             # 📨 메시지 2: 종목 분석 결과 + 체크리스트
-            msg2  = f"📊 **[종목 분석 결과]** ({filter_level} / {BSNS_YEAR}년 기준 / 영업이익 높은순 상위 {len(profit_results)}개)\n"
+            msg2  = f"📊 **[종목 분석 결과]** ({filter_level} / {BSNS_YEAR}년 기준 / 영업이익 높은순 상위 {len(final_results)}개)\n"
             msg2 += "="*30 + "\n"
-            for r in profit_results:
+            for r in final_results:
                 oi = r.get('operating_income')
-                oi_str = f"{oi/1e8:.0f}억" if oi else "-"
+                oi_str = f"{oi/1e8:.0f}억" if oi is not None else "-"
                 msg2 += f"· {r['name']} : {r['disparity']}% / {oi_str}\n"
             msg2 += "\n" + "="*30 + "\n"
             msg2 += "📝 **[Check List]**\n"
@@ -406,7 +399,7 @@ def main():
             msg2 += "4. 추천한 종목들 이격도 하락 원인 분석해서 추천한게 맞는지 검증\n"
             send_discord_message(msg2)
 
-            print(f"✅ 메시지 2개 전송 완료. (종목 {len(profit_results)}개)")
+            print(f"✅ 메시지 2개 전송 완료. (종목 {len(final_results)}개)")
         else:
             send_discord_message("🔍 조건에 맞는 종목이 없습니다.")
 
