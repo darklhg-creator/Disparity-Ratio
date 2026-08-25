@@ -2,7 +2,7 @@ name: Stock Analysis Workflow1
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 5 * * *'
+    - cron: '30 7 * * *'
 jobs:
   build:
     runs-on: ubuntu-latest
