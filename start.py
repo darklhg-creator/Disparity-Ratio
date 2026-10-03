@@ -192,55 +192,7 @@ def get_dart_info(corp_code):
     return None
 
 # ==========================================
-# 7. 고객예탁금 + 신용잔고
-# ==========================================
-def get_market_capital_info():
-    print("💰 고객예탁금/신용잔고 조회 중...")
-    base = "https://apis.data.go.kr/1160100/service/GetKofiaStatisticsInfoService"
-    try:
-        res = requests.get(base + "/getSecuritiesMarketTotalCapitalInfo",
-                           params={"serviceKey": API_KEY, "numOfRows": "2", "pageNo": "1", "resultType": "json"}, timeout=10)
-        deposit_raw = res.json()['response']['body']['items']['item']
-        deposit_data = sorted(deposit_raw if isinstance(deposit_raw, list) else [deposit_raw],
-                              key=lambda x: x['basDt'], reverse=True)
-
-        res = requests.get(base + "/getGrantingOfCreditBalanceInfo",
-                           params={"serviceKey": API_KEY, "numOfRows": "2", "pageNo": "1", "resultType": "json"}, timeout=10)
-        credit_raw = res.json()['response']['body']['items']['item']
-        credit_data = sorted(credit_raw if isinstance(credit_raw, list) else [credit_raw],
-                             key=lambda x: x['basDt'], reverse=True)
-
-        today_deposit = int(deposit_data[0]['invrDpsgAmt'])
-        today_credit = int(credit_data[0]['crdTrFingWhl'])
-        prev_credit = int(credit_data[1]['crdTrFingWhl']) if len(credit_data) > 1 else None
-        credit_ratio = round((today_credit / today_deposit) * 100, 2)
-        credit_change = round((today_credit - prev_credit) / prev_credit * 100, 2) if prev_credit else None
-        print(f"✅ 고객예탁금: {today_deposit/1e12:.1f}조, 신용잔고: {today_credit/1e12:.1f}조, 비율: {credit_ratio}%")
-        return {'deposit': today_deposit, 'credit': today_credit, 'credit_ratio': credit_ratio, 'credit_change': credit_change}
-    except Exception as e:
-        print(f"고객예탁금/신용잔고 조회 오류: {e}")
-        return None
-
-def get_capital_comment(info):
-    if info is None:
-        return "· 고객예탁금/신용잔고: 데이터 없음\n"
-    ratio = info['credit_ratio']
-    change = info['credit_change']
-    ratio_comment = (f"{ratio}% ✅ 안전 (레버리지 낮음)" if ratio <= 20 else
-                     f"{ratio}% 📊 보통" if ratio <= 25 else
-                     f"{ratio}% ⚠️ 주의 (레버리지 과다)" if ratio <= 30 else
-                     f"{ratio}% 🚨 위험 (폭락장 전조 가능성)")
-    change_comment = ("전일대비: 데이터 없음" if change is None else
-                      f"전일대비: {change}% 🚨 급감 (반대매매 위험)" if change <= -4 else
-                      f"전일대비: {change}% ⚠️ 주의" if change <= -2 else
-                      f"전일대비: {change}% ⚠️ 레버리지 증가" if change >= 2 else
-                      f"전일대비: {change}% 📊 보통")
-    return (f"· 고객예탁금: {info['deposit']/1e12:.1f}조 / 신용잔고: {info['credit']/1e12:.1f}조\n"
-            f"· 신용잔고/예탁금 비율: {ratio_comment}\n"
-            f"· 신용잔고 {change_comment}\n")
-
-# ==========================================
-# 8. 이격도 계산 (멀티스레딩용)
+# 7. 이격도 계산 (멀티스레딩용)
 # ==========================================
 def fetch_disparity(row):
     code, name, market = row['Code'], row['Name'], row['Market']
@@ -260,7 +212,7 @@ def fetch_disparity(row):
         return None
 
 # ==========================================
-# 9. 지수 이격도
+# 8. 지수 이격도
 # ==========================================
 def get_index_disparity():
     print("📈 코스피/코스닥 지수 이격도 계산 중...")
@@ -293,7 +245,7 @@ def get_index_comment(name, disparity):
         return f"· {name}: {disparity}% 📊 보통 수준입니다"
 
 # ==========================================
-# 10. 메인 로직
+# 9. 메인 로직
 # ==========================================
 def main():
     print(f"[{TARGET_DATE}] 프로그램 시작 (한국 시간 기준)")
@@ -370,39 +322,35 @@ def main():
 
         print(f"✅ 데이터없음 제외: {excluded_nodata}개, 최종: {len(final_results)}개")
 
-        capital_info = get_market_capital_info()
         index_disparity = get_index_disparity()
 
         if final_results:
-            # 📨 메시지 1: 시장 이격도 + 자금현황
-            msg1  = f"📈 **[{TARGET_DATE} 시장 이격도]**\n"
-            msg1 += get_index_comment("KOSPI",  index_disparity.get('KOSPI'))  + "\n"
-            msg1 += get_index_comment("KOSDAQ", index_disparity.get('KOSDAQ')) + "\n"
-            msg1 += "\n" + "="*30 + "\n"
-            msg1 += "💰 **[시장 자금 현황]**\n"
-            msg1 += get_capital_comment(capital_info)
-            send_discord_message(msg1)
-            time.sleep(1)
-
-            # 📨 메시지 2: 종목 분석 결과 + 체크리스트
-            msg2  = f"📊 **[종목 분석 결과]** ({filter_level} / {BSNS_YEAR}년 기준 / 영업이익 높은순 상위 {len(final_results)}개)\n"
-            msg2 += "="*30 + "\n"
+            # 📨 메시지: 종목 분석 결과 + 체크리스트 + 마지막에 시장 이격도
+            msg  = f"📊 **[종목 분석 결과]** ({filter_level} / {BSNS_YEAR}년 기준 / 영업이익 높은순 상위 {len(final_results)}개)\n"
+            msg += "="*30 + "\n"
             for r in final_results:
                 oi = r.get('operating_income')
                 oi_str = f"{oi/1e8:.0f}억" if oi is not None else "-"
-                msg2 += f"· {r['name']} : {r['disparity']}% / {oi_str}\n"
-            msg2 += "\n" + "="*30 + "\n"
-            msg2 += "📝 **[Check List]**\n"
-            msg2 += "1. 최근 일주일간 수급이 몰리는 테마순위로 표분류\n"
-            msg2 += "2. 최근 일주일간 뉴스검색해서 주도테마 선정\n"
-            msg2 += "3. 주도테마 고려해서 최대실적이 예상되거나 영업이익 전망이 좋은 기업순으로 추천\n"
-            msg2 += "4. 추천한 종목들 이격도 하락 원인 분석해서 추천한게 맞는지 검증\n"
-            msg2 += "5.최근 5거래일 외국인·기관 수급\n"
-            msg2 += "6.2025~2026 영업이익 컨센서스 증가\n"
-            msg2 += "7.주봉 차트(중기 추세) + 이격도 하락 원인\n"
-            send_discord_message(msg2)
+                msg += f"· {r['name']} : {r['disparity']}% / {oi_str}\n"
 
-            print(f"✅ 메시지 2개 전송 완료. (종목 {len(final_results)}개)")
+            msg += "\n" + "="*30 + "\n"
+            msg += "📝 **[Check List]**\n"
+            msg += "1. 최근 일주일간 수급이 몰리는 테마순위로 표분류\n"
+            msg += "2. 최근 일주일간 뉴스검색해서 주도테마 선정\n"
+            msg += "3. 주도테마 고려해서 최대실적이 예상되거나 영업이익 전망이 좋은 기업순으로 추천\n"
+            msg += "4. 추천한 종목들 이격도 하락 원인 분석해서 추천한게 맞는지 검증\n"
+            msg += "5.최근 5거래일 외국인·기관 수급\n"
+            msg += "6.2025~2026 영업이익 컨센서스 증가\n"
+            msg += "7.주봉 차트(중기 추세) + 이격도 하락 원인\n"
+
+            # 시장 이격도는 메시지 맨 마지막에 출력
+            msg += "\n" + "="*30 + "\n"
+            msg += f"📈 **[{TARGET_DATE} 시장 이격도]**\n"
+            msg += get_index_comment("KOSPI", index_disparity.get('KOSPI')) + "\n"
+            msg += get_index_comment("KOSDAQ", index_disparity.get('KOSDAQ')) + "\n"
+
+            send_discord_message(msg)
+            print(f"✅ 메시지 전송 완료. (종목 {len(final_results)}개)")
         else:
             send_discord_message("🔍 조건에 맞는 종목이 없습니다.")
 
